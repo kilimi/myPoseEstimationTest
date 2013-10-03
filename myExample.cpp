@@ -14,8 +14,11 @@ int main(int argc, char* argv[])
 {
 	string inputPath = string("./in/");
 	string outputPath = string("./out/");
-	string rgbImageName = string("colorImage_A00366802050045A_0_ds.ppm");
-	string depthImageName = string("depthImage_A00366802050045A_0.png");
+	//string rgbImageName = string("colorImage_A00366802050045A_0_ds.ppm");
+	//string depthImageName = string("depthImage_A00366802050045A_0.png");
+
+	string rgbImageName = string("p1.png");
+	string depthImageName = string("zBuffer.exr");
 	string xmlConfigFileName = string("defaultModule.xml");
 	string calibrationFileName = string("calibration_A00366802050045A.yml");
 	
@@ -26,15 +29,16 @@ int main(int argc, char* argv[])
 	cv::Mat_<int> depth;
 	DescECV::Vec surf;
 	
-	CameraCalibrationCV cc = CameraCalibrationCV();
+	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
 	cc.read(inputPath + calibrationFileName);
 	//cc.printInConsole();
 	
-	DescriptorUtil du = DescriptorUtil();
-	du.loadRGBD(rgbFile, depthFile, rgb,  depth, cc);
-	
-	DescriptorEstimation de  = DescriptorEstimation();
+	DescriptorUtil().loadRGBD(rgbFile, depthFile, rgb,  depth, cc);
+	cout <<"Depth type:: "<< depth.type() << endl;
+	DescriptorEstimation de;
 	pair<DescSeg::Vec, DescTex::Vec> temp = de.ecv(rgb, depth, surf, true, true);
+	
+	
 	
 	waitKey(0);
 	return 0;
