@@ -17,10 +17,10 @@ int main(int argc, char* argv[])
 	//string rgbImageName = string("colorImage_A00366802050045A_0_ds.ppm");
 	//string depthImageName = string("depthImage_A00366802050045A_0.png");
 
-	string rgbImageName = string("p1.png");
-	string depthImageName = string("zBuffer.exr");
-	string xmlConfigFileName = string("defaultModule.xml");
-	string calibrationFileName = string("calibration_A00366802050045A.yml");
+	string rgbImageName = string("test2.png");
+	string depthImageName = string("test2.exr");
+	//string xmlConfigFileName = string("defaultModule.xml");
+	string calibrationFileName = string("calibration_A00366802050045A.txt");
 	
 	string rgbFile = inputPath + rgbImageName;
 	string depthFile = inputPath + depthImageName;
@@ -29,15 +29,27 @@ int main(int argc, char* argv[])
 	cv::Mat_<int> depth;
 	DescECV::Vec surf;
 	
-	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
-	cc.read(inputPath + calibrationFileName);
+	CameraCalibrationCV cc = CameraCalibrationCV::BlenderCamera(); 
+	//CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
+	//cc.addTransformationFromTxtFile(inputPath + calibrationFileName, 0);
 	//cc.printInConsole();
+	//cout << "-------------" << endl;
+	//ck.printInConsole();
 	
 	DescriptorUtil().loadRGBD(rgbFile, depthFile, rgb,  depth, cc);
-	cout <<"Depth type:: "<< depth.type() << endl;
+	
+	DescRGB::Vec points;
+	DescriptorUtil().reproject<DescRGB>(rgb, depth, points, CameraCalibrationCV::KinectIdeal());
+	DescriptorUtil().show<DescRGB>(points);
+	
+	cv::Mat_<float> df = depth;
+	normalize(df, df, 1, 0, CV_MINMAX);
+	imshow("", df);
+	waitKey();
+
 	DescriptorEstimation de;
 	pair<DescSeg::Vec, DescTex::Vec> temp = de.ecv(rgb, depth, surf, true, true);
-	
+	cout<< "me done" << endl;
 	
 	
 	waitKey(0);
