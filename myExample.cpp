@@ -14,13 +14,11 @@ int main(int argc, char* argv[])
 {
 	string inputPath = string("./in/");
 	string outputPath = string("./out/");
-	//string rgbImageName = string("colorImage_A00366802050045A_0_ds.ppm");
-	//string depthImageName = string("depthImage_A00366802050045A_0.png");
 
-	string rgbImageName = string("test2.png");
-	string depthImageName = string("test2.exr");
+    string rgbImageName = string("bottom.ppm");
+    string depthImageName = string("bottom.png");
 	//string xmlConfigFileName = string("defaultModule.xml");
-	string calibrationFileName = string("calibration_A00366802050045A.txt");
+	//string calibrationFileName = string("calibration_A00366802050045A.txt");
 	
 	string rgbFile = inputPath + rgbImageName;
 	string depthFile = inputPath + depthImageName;
@@ -29,8 +27,8 @@ int main(int argc, char* argv[])
 	cv::Mat_<int> depth;
 	DescECV::Vec surf;
 	
-	CameraCalibrationCV cc = CameraCalibrationCV::BlenderCamera(); 
-	//CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
+	//CameraCalibrationCV cc = CameraCalibrationCV::BlenderCamera(); 
+	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
 	//cc.addTransformationFromTxtFile(inputPath + calibrationFileName, 0);
 	//cc.printInConsole();
 	//cout << "-------------" << endl;
@@ -38,17 +36,27 @@ int main(int argc, char* argv[])
 	
 	DescriptorUtil().loadRGBD(rgbFile, depthFile, rgb,  depth, cc);
 	
-	DescRGB::Vec points;
-	DescriptorUtil().reproject<DescRGB>(rgb, depth, points, CameraCalibrationCV::KinectIdeal());
-	DescriptorUtil().show<DescRGB>(points);
+    DescRGB::Vec points;
+    DescriptorUtil().reproject<DescRGB>(rgb, depth, points, cc);
+    DescriptorUtil().show<DescRGB>(points);
 	
-	cv::Mat_<float> df = depth;
+	/*cv::Mat_<float> df = depth;
 	normalize(df, df, 1, 0, CV_MINMAX);
 	imshow("", df);
 	waitKey();
-
+*/
 	DescriptorEstimation de;
 	pair<DescSeg::Vec, DescTex::Vec> temp = de.ecv(rgb, depth, surf, true, true);
+
+//    for (unsigned int i = 0; i < temp.first.size(); i++)
+//    {
+////      _texs3D.at(i).rotate(R);
+////      _texs3D.at(i).translate(t);
+//    }
+
+
+
+
 	cout<< "me done" << endl;
 	
 	
