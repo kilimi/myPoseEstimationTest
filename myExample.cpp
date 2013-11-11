@@ -14,7 +14,7 @@ using namespace PoseEstimation;
 using namespace cv;
 
 typedef DescRGBN DescT;
-void computeELSfromPointCLoud(string xmlName, string rgbFile, string depthFile, string pointCloudFile, bool usePCD);
+std::pair<DescHist::Vec, DescHist::Vec> computeELSfromPointCLoud(string xmlName, string rgbFile, string depthFile, string pointCloudFile, bool usePCD);
 
 void setTransformation( KVector<> &_t, KMatrix<> &_R, int camera)
 {
@@ -256,15 +256,22 @@ int main(int argc, char* argv[])
 
 	//object with pointCloud
 
-	computeELSfromPointCLoud("rgb_depth", "./in/top.ppm", "./in/top.png", "./in/top.pcd");
+	std::pair<DescHist::Vec, DescHist::Vec> hist = computeELSfromPointCLoud("top_with_pattern_pcd", "./in/top.ppm", "./in/top.png", "./in/top.pcd", true);
+	std::pair<DescHist::Vec, DescHist::Vec> histScene = computeELSfromPointCLoud("top_with_pattern_rgb_depth", "./in/top.ppm", "./in/top.png", "./in/top.pcd", false);
+//	std::pair<DescHist::Vec, DescHist::Vec> histScene = computeELSfromPointCLoud("topMoved_rgbDepth", "./in/top_moved.ppm", "./in/top_moved.png", "./in/top_moved.pcd", false);
+	DescHist::Vec source, target;
+	source = hist.second;
+	target = histScene.second;
+	AlignmentUtil().translate<DescHist>(source, 100, 100, 0);
+	DescriptorUtil().showCorr<DescHist>(source, target, nearestFeatures<DescHist>(source, target), 50);
 
 	waitKey(0);
 	return 0;
 }
 
 
-void computeELSfromPointCLoud(string xmlName, string rgbFile, string depthFile, string pointCloudFile, bool usePCD)
-{
+std::pair<DescHist::Vec, DescHist::Vec> computeELSfromPointCLoud(string xmlName, string rgbFile, string depthFile, string pointCloudFile, bool usePCD)
+		{
 	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
 
 	cv::Mat_<cv::Vec3b> rgb;
@@ -298,10 +305,6 @@ void computeELSfromPointCLoud(string xmlName, string rgbFile, string depthFile, 
 				data3D(r, c)[1] = p.y * 1000 * (-1);
 				data3D(r, c)[2] = p.z * 1000 * (-1);
 			}
-			else
-			{
-				cout <<"Point cloud is not organized" << endl;
-			}
 		}
 	}
 
@@ -325,6 +328,8 @@ void computeELSfromPointCLoud(string xmlName, string rgbFile, string depthFile, 
 	} else {
 		mapp = map;
 	}
+
+
 
 	DescriptorEstimation de;
 
@@ -374,7 +379,31 @@ void computeELSfromPointCLoud(string xmlName, string rgbFile, string depthFile, 
 	cv::cvtColor(rgb, imgBGR, CV_RGB2BGR);
 	kfm.setKinectData(depth, imgBGR);
 
-	kfm.computeExtendedLineSegments(_els, _ls, data3D2);
+	// Results
+	std::pair<DescSeg::Vec, DescTex::Vec> result;
+	std::vector<int> keypointsSeg;
+	std::vector<int> keypointsTex;
+	keypointsSeg.clear();
+	keypointsTex.clear();
+
+	DescXYZ::Vec _temp = DescriptorUtil().fromPCL<pcl::PointXYZ, DescXYZ>(cloud, false);
+	// Search structure in input
+	typename CorrespondenceSearch<DescXYZ>::Ptr searchInput = CorrespondenceSearch<DescXYZ>::MakeXYZNNSearch(_temp, 1);
+
+
+	if (!usePCD) kfm.computeExtendedLineSegments(_els, _ls, data3D2);
+	else kfm.computeExtendedLineSegments(_els, _ls, data3D);
+
+	//save temp images
+	const_cast<SingleView<double>&>(kfm.getSingleView()).saveImages();
+	// Store segments
+	result.first = DescriptorEstimation().eseg<DescSeg>(*_els);
+	keypointsSeg.reserve(result.first.size());
+	for (DescSeg::Vec::const_iterator it = result.first.begin(); it != result.first.end(); ++it) {
+		searchInput->query(*it);
+		const int idx3D = searchInput->getNearestIdx().front();
+		keypointsSeg.push_back(idx3D);
+	}
 
 	COVIS_ASSERT_MSG(!_ls->empty(), "No 2D line segments found!");
 	COVIS_ASSERT_MSG(!_els->empty(), "No extended 3D line segments found!");
@@ -393,27 +422,77 @@ void computeELSfromPointCLoud(string xmlName, string rgbFile, string depthFile, 
 
 	std::vector<extendedLineSegment3D> els1;
 	els1 = *_els;
-	for (unsigned int i = 0; i < els1.size(); i++)
-	{
-		els1.at(i).translate(_t);
-	}
+	//	for (unsigned int i = 0; i < els1.size(); i++)
+	//	{
+	//		els1.at(i).translate(_t);
+	//	}
 
 	write3DExtendedLineSegmentsToXMLFile(els1, outXML.c_str());
 
+	//********************TEXLETS*******************************************************
+
+	//texlets
 	std::tr1::shared_ptr<std::vector<texlet2D> > texlet2Ds(new std::vector<texlet2D>);
 	std::tr1::shared_ptr<std::vector<texlet3D> > texlet3Ds(new std::vector<texlet3D>);
-	kfm.computeTexlets(texlet3Ds, texlet2Ds, data3D2, false);
+	if (!usePCD) kfm.computeTexlets(texlet3Ds, texlet2Ds, data3D2, false);
+	else kfm.computeTexlets(texlet3Ds, texlet2Ds, data3D, false);
+
+	// Store texlets
+	result.second = DescriptorEstimation().tex<DescTex>(*texlet3Ds);
+	std::vector<texlet3D> texs = *texlet3Ds;
+	// TODO: Keypoint: nearest input point
+	keypointsTex.reserve(result.second.size());
+	for (DescTex::Vec::const_iterator it = result.second.begin(); it != result.second.end(); ++it) {
+		searchInput->query(*it);
+		const int idx3D = searchInput->getNearestIdx().front();
+		keypointsTex.push_back(idx3D);
+	}
 
 	// Check
 	COVIS_ASSERT_MSG(!texlet2Ds->empty(), "No 2D texlets found!");
 	COVIS_ASSERT_MSG(!texlet3Ds->empty(), "No 3D texlets found!");
 
-	// TODO
 	string outXMLtex;
 	outXMLtex.append("./xml/");
 	outXMLtex.append(xmlName);
 	outXMLtex.append("_TEX.xml");
 	write3DTexletsToXMLFile(*texlet3Ds, outXMLtex.c_str());
 
-}
+	//*************SURFACE*******************************************
+	// TODO: Surface: uniform texlets with highest possible density
+	Modules::KinectFeatureModule kfmSurf;
+	kfmSurf.setCalibration(cc, w, h); // TODO
+	kfmSurf.setFilterType(MONOGENIC_FREQ0110);
+	kfmSurf.setTexletiDThresholds(0.01, 0.01);
+	kfmSurf.setKinectData(depth, imgBGR);
+
+	// Initialize
+	COVIS_ASSERT(kfmSurf.Init());
+
+	// Run
+	std::tr1::shared_ptr<std::vector<texlet2D> > texlet2DSurf(new std::vector<texlet2D>);
+	std::tr1::shared_ptr<std::vector<texlet3D> > texlet3DSurf(new std::vector<texlet3D>);
+
+	if (!usePCD) kfmSurf.computeTexlets(texlet3DSurf, texlet2DSurf, data3D2, true);
+	else kfmSurf.computeTexlets(texlet3DSurf, texlet2DSurf, data3D, true);
+
+	DescECV::Vec surface = DescriptorEstimation().tex<DescECV>(*texlet3DSurf);
+
+	bool _normalize = true;
+	// Normalization
+	if (_normalize) {
+		normalize<DescECV>(surface);
+		normalize<DescSeg>(result.first);
+		normalize<DescTex>(result.second);
+	} else {
+		std::cerr << "Warning: normalization disabled during descriptor estimation!" << std::endl;
+		std::cerr << "\tTo use the context descriptors for further processing such as correspondence search, remember to normalize first!" << std::endl;
+	}
+
+	//*********************************histogram
+
+	std::pair<DescHist::Vec, DescHist::Vec> hist = DescriptorEstimation().histogramECV(result, surface, 10, 10, false, true);
+
+	return hist;
+		}
 
