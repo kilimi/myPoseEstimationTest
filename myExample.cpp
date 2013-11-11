@@ -14,7 +14,7 @@ using namespace PoseEstimation;
 using namespace cv;
 
 typedef DescRGBN DescT;
-void computeELSfromPointCLoud(string xmlName, string rgbFile, string depthFile, string pointCloudFile);
+void computeELSfromPointCLoud(string xmlName, string rgbFile, string depthFile, string pointCloudFile, bool usePCD);
 
 void setTransformation( KVector<> &_t, KMatrix<> &_R, int camera)
 {
@@ -87,8 +87,6 @@ void setTransformation( KVector<> &_t, KMatrix<> &_R, int camera)
 	_R = _R * yaw;
 	_t= _t*1000;
 }
-
-
 void run(string name, string inputPath)
 {
 	string _rgb;
@@ -155,8 +153,6 @@ void run(string name, string inputPath)
 	cout<< outXML << " is saved" << endl;
 
 }
-
-
 void justSaveElsAndTex(string xmlName, string rgbFile, string depthFile)
 {
 	cv::Mat_<cv::Vec3b> rgb;
@@ -237,14 +233,6 @@ void test(string name, string inputPath, string rgbFileScene,  string depthFileS
 	DescriptorUtil().showCorr<DescHist>(source, target, nearestFeatures<DescHist>(source, target), 50);
 }
 
-
-void saveLineSegments3D()
-{
-
-}
-
-
-
 int main(int argc, char* argv[])
 {
 	string inputPath = string("./in/");
@@ -268,62 +256,164 @@ int main(int argc, char* argv[])
 
 	//object with pointCloud
 
-	computeELSfromPointCLoud("pointCloud", "./in/rc_top.ppm", "./in/rc_top.png", "./in/rc_pointcloud_top.png");
+	computeELSfromPointCLoud("rgb_depth", "./in/top.ppm", "./in/top.png", "./in/top.pcd");
 
 	waitKey(0);
 	return 0;
 }
 
 
-void computeELSfromPointCLoud(string xmlName, string rgbFile, string depthFile, string pointCloudFile)
+void computeELSfromPointCLoud(string xmlName, string rgbFile, string depthFile, string pointCloudFile, bool usePCD)
 {
+	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
+
 	cv::Mat_<cv::Vec3b> rgb;
 	cv::Mat_<int> depth;
 	DescECV::Vec surf;
 
-	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
-	std::vector<extendedLineSegment3D> els;
-	std::vector<texlet3D> tex;
-	DescriptorEstimation de;
 	DescriptorUtil().loadRGBD(rgbFile, depthFile, rgb,  depth, cc);
-	pcl::PointCloud<pcl::PointXYZ> cloud; // Filled with data to copy
+	const int w = rgb.cols;
+	const int h = rgb.rows;
 
-	if (pcl::io::loadPCDFile<pcl::PointXYZ> ("./in/top.pcd", cloud) == -1) //* load the file
+	pcl::PointCloud<pcl::PointXYZ> cloud;
+
+	if (pcl::io::loadPCDFile<pcl::PointXYZ> (pointCloudFile, cloud) == -1)
 	{
-		PCL_ERROR ("Couldn't read file test_pcd.pcd \n");
+		std::cout << "Couldn't read file pcd" << endl;
 	}
-	std::cout << "Loaded " << endl;
+	else std::cout << "Loaded " << endl;
 
+	cout << "is cloud organised? " << cloud.isOrganized() << endl;
+	cout << "cloud height: " << cloud.height << " , width: " << cloud.width << endl;
+	const int hc = cloud.height;
+	const int wc = cloud.width;
 
-	const int h = cloud.height;
-	const int w = cloud.width;
-
-	cv::Mat_<cv::Vec3f> data3D(h, w, cv::Vec3f::all(0.0f));
-	for (int r = 0; r < h; ++r) {
-		for (int c = 0; c < w; ++c) {
+	//converts from pcd to Mat
+	cv::Mat_<cv::Vec3f> data3D(hc, wc, cv::Vec3f::all(0.0f));
+	for (int r = 0; r < hc; ++r) {
+		for (int c = 0; c < wc; ++c) {
 			const pcl::PointXYZ& p = cloud(c,r);
 			if(pcl::isFinite(p)) {
-				data3D(r, c)[0] = p.x;
-				data3D(r, c)[1] = p.y;
-				data3D(r, c)[2] = p.z;
+				data3D(r, c)[0] = p.x * 1000;
+				data3D(r, c)[1] = p.y * 1000 * (-1);
+				data3D(r, c)[2] = p.z * 1000 * (-1);
+			}
+			else
+			{
+				cout <<"Point cloud is not organized" << endl;
 			}
 		}
 	}
 
-//	pair<DescSeg::Vec, DescTex::Vec> temp = de.ecv(rgb, depth, data3D, surf, true, true, els, tex);
 
-	//		string outXML;
-	//		outXML.append("./xml/");
-	//		outXML.append(xmlName);
-	//		outXML.append("_ELS.xml");
-	//		write3DExtendedLineSegmentsToXMLFile(els, outXML.c_str());
-	//
-	//		string outXMLtex;
-	//		outXMLtex.append("./xml/");
-	//		outXMLtex.append(xmlName);
-	//		outXMLtex.append("_TEX.xml");
-	//		write3DTexletsToXMLFile(tex, outXMLtex.c_str());
-	//		cout<< outXML << " is saved" << endl;
+	DescXYZ::Vec points;
+	cv::Mat_<int> map;
+	DescriptorUtil().reproject(depth, points, map, cc);
+
+	const int size = points.size();
+
+	// Check the mapping
+	cv::Mat_<int> mapp;
+	if (map.empty()) { // If empty, default to dense map, row-major
+		COVIS_ASSERT_MSG(size == w*h, "Too few 3D points!");;
+
+		mapp = cv::Mat_<int>(h, w);
+		int index = 0;
+		for (int r = 0; r < h; ++r)
+			for (int c = 0;  c < w; ++c)
+				mapp(r, c) = index++;
+	} else {
+		mapp = map;
+	}
+
+	DescriptorEstimation de;
+
+	//pair<DescSeg::Vec, DescTex::Vec> temp =de.ecv(rgb, depth, surf, true, true, els, tex);
+	//de.getElsAndTex(rgb, depth, data3D, surf, els, tex);
+
+
+	std::tr1::shared_ptr<std::vector<extendedLineSegment3D> > _els(new std::vector<extendedLineSegment3D>);
+	std::tr1::shared_ptr<std::vector<lineSegment2D> > _ls(new std::vector<lineSegment2D>);
+
+	// Kinect feature module
+	Modules::KinectFeatureModule kfm;
+
+	// Module parameters
+	XMLWrapper::XMLNode rootnode;
+	if (XMLWrapper::getXMLRootNode("module.xml", rootnode)) {
+		kfm.setParametersFromXML(rootnode, "kinectFeatures");
+	} else {
+		std::cerr << "Failed to load module configuration file \"module.xml\"!" << std::endl;
+		std::cerr << "\tSetting default extraction parameters..." << std::endl;
+		// Set some default parameters
+		kfm.useRansac(50, 1.8f);
+	}
+
+	// Calibration
+	kfm.setCalibration(cc, w, h); // TODO
+
+	// Compute image of XYZ values
+	cv::Mat_<cv::Vec3f> data3D2(h, w, cv::Vec3f::all(0.0f));
+	for (int r = 0; r < h; ++r) {
+		for (int c = 0; c < w; ++c) {
+			const int idx = map(r, c);
+			if (idx != -1) {
+				const DescXYZ& d = points[idx];
+				data3D2(r, c)[0] = d.x;
+				data3D2(r, c)[1] = d.y;
+				data3D2(r, c)[2] = d.z;
+			}
+		}
+	}
+
+	// Initialize
+	COVIS_ASSERT(kfm.Init());
+
+	// Set input data
+	cv::Mat imgBGR; // NOTE: This assumes BGR alignment!
+	cv::cvtColor(rgb, imgBGR, CV_RGB2BGR);
+	kfm.setKinectData(depth, imgBGR);
+
+	kfm.computeExtendedLineSegments(_els, _ls, data3D2);
+
+	COVIS_ASSERT_MSG(!_ls->empty(), "No 2D line segments found!");
+	COVIS_ASSERT_MSG(!_els->empty(), "No extended 3D line segments found!");
+
+	string outXML;
+	outXML.append("./xml/");
+	outXML.append(xmlName);
+	outXML.append("_ELS.xml");
+
+	KVector<> _t(3);
+	_t[0] = 0;
+	_t[1] = 0;
+	_t[2] = 0;
+	//	_t[1] = 3;
+	//	_t[2] = 15;
+
+	std::vector<extendedLineSegment3D> els1;
+	els1 = *_els;
+	for (unsigned int i = 0; i < els1.size(); i++)
+	{
+		els1.at(i).translate(_t);
+	}
+
+	write3DExtendedLineSegmentsToXMLFile(els1, outXML.c_str());
+
+	std::tr1::shared_ptr<std::vector<texlet2D> > texlet2Ds(new std::vector<texlet2D>);
+	std::tr1::shared_ptr<std::vector<texlet3D> > texlet3Ds(new std::vector<texlet3D>);
+	kfm.computeTexlets(texlet3Ds, texlet2Ds, data3D2, false);
+
+	// Check
+	COVIS_ASSERT_MSG(!texlet2Ds->empty(), "No 2D texlets found!");
+	COVIS_ASSERT_MSG(!texlet3Ds->empty(), "No 3D texlets found!");
+
+	// TODO
+	string outXMLtex;
+	outXMLtex.append("./xml/");
+	outXMLtex.append(xmlName);
+	outXMLtex.append("_TEX.xml");
+	write3DTexletsToXMLFile(*texlet3Ds, outXMLtex.c_str());
+
 }
-
 
