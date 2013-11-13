@@ -237,27 +237,8 @@ int main(int argc, char* argv[])
 	string inputPath = string("./in/");
 
 	string outputPath = string("./out/");
-	//
-	//	run("top", inputPath);
-	//	run("bottom", inputPath);
-	//	run("right", inputPath);
-	//	run("left", inputPath);
-	//	run("right2", inputPath);
-	//	run("left2", inputPath);
-
-	//	test("circle_top", inputPath, "./in/circle_rgb.tiff", "./in/circle_depth.tiff");
-
-	//scene
-	//	justSaveElsAndTex("rgb1", "./in/rgb1.tiff", "./in/depth1.tiff");
-
-	//object
-	//	justSaveElsAndTex("rc", "./in/rc_top.ppm", "./in/rc_top.png");
-
-	//object with pointCloud
 
 	DescTex::Vec texobj, texscn;
-//	std::pair<DescHist::Vec, DescHist::Vec> hist = computeELSfromPointCLoud("object", "./in/top.ppm", "./in/top.png", "./in/top.pcd", false);
-//	std::pair<DescHist::Vec, DescHist::Vec> histScene = computeELSfromPointCLoud("scene_original", "./in/scene_rgb.tiff", "./in/scene_depth.tiff", "./in/scene.pcd", true);
 
 	std::pair<DescSeg::Vec, DescTex::Vec> obj = computeELSfromPointCLoud2("object", "./in/top.ppm", "./in/top.png", "./in/top.pcd", true);
 	std::pair<DescSeg::Vec, DescTex::Vec> scene = computeELSfromPointCLoud2("scene_original", "./in/scene_rgb.tiff", "./in/scene_depth.tiff", "./in/scene.pcd", true);
@@ -276,15 +257,6 @@ int main(int argc, char* argv[])
 
 	DescriptorUtil().showDetections<DescTex>(std::vector<DescTex::Vec>(1,texobj), texscn, rec->recognizeL(texscn));
 
-
-
-	//	DescHist::Vec source, target;
-	//	source = hist.second;
-	//	target = histScene.second;
-	//	cout << "Source before: " << source[0].z << endl;
-	//	AlignmentUtil().translate<DescHist>(source, 0, 0, 100);
-	//	cout << "Source after: " << source[0].z << endl;
-//		DescriptorUtil().showCorr<DescHist>(source, target, nearestFeatures<DescHist>(source, target), 50);
 
 	waitKey(0);
 	return 0;
