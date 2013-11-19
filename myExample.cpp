@@ -493,15 +493,10 @@ std::pair<DescSeg::Vec, DescTex::Vec> getSegAndTex(string xmlName, cv::Mat_<cv::
 		std::cerr << "\tTo use the context descriptors for further processing such as correspondence search, remember to normalize first!" << std::endl;
 	}
 
-	//*********************************histogram
-
-
-
 	return result;
 }
 
 
-//************************** *********************************** *******************************************************
 
 
 int main(int argc, char* argv[])
@@ -511,7 +506,7 @@ int main(int argc, char* argv[])
 
 	DescTex::Vec texobj, texscn;
 
-	bool flag = false;
+	bool flag = true;
 
 			std::pair<DescSeg::Vec, DescTex::Vec> obj = computeELSfromPointCLoud2("object", "./in/top.ppm", "./in/top.png", "./in/top.pcd", flag);
 	//		std::pair<DescSeg::Vec, DescTex::Vec> scene = computeELSfromPointCLoud2("s2", "./in/s2.tiff", "./in/s2_depth.tiff", "./in/scene2.pcd", flag);
@@ -545,21 +540,21 @@ int main(int argc, char* argv[])
 	std::pair<DescSeg::Vec, DescTex::Vec> scene = getSegAndTex("scene2Res", rgb2, depthImg, pointcl, flag);
 
 
-
-		texobj = obj.second;
-		texscn = scene.second;
-
-		//	DescriptorUtil().show<DescTex>(texobj, texscn, "crap");
-
-		Recognition<DescTex,DescHist>::Ptr rec(new RecognitionVoting<DescTex,DescHist>(1, 25, 5, 0.05, false, false, false, INF_FLOAT));
-		//	rec->setVerbose(true);
-		rec->setCoplanarityFraction(1);
-
-		rec->loadObjectsL(std::vector<DescTex::Vec>(1,texobj));
-
-
-		DescriptorUtil().showDetections<DescTex>(std::vector<DescTex::Vec>(1,texobj), texscn, rec->recognizeL(texscn));
-
+//
+//		texobj = obj.second;
+//		texscn = scene.second;
+//
+//		//	DescriptorUtil().show<DescTex>(texobj, texscn, "crap");
+//
+//		Recognition<DescTex,DescHist>::Ptr rec(new RecognitionVoting<DescTex,DescHist>(1, 25, 5, 0.05, false, false, false, INF_FLOAT));
+//		//	rec->setVerbose(true);
+//		rec->setCoplanarityFraction(1);
+//
+//		rec->loadObjectsL(std::vector<DescTex::Vec>(1,texobj));
+//
+//
+//		DescriptorUtil().showDetections<DescTex>(std::vector<DescTex::Vec>(1,texobj), texscn, rec->recognizeL(texscn));
+//
 
 	waitKey(0);
 	return 0;
