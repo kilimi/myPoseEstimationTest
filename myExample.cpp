@@ -153,7 +153,7 @@ void run(string name, string inputPath)
 	cout<< outXML << " is saved" << endl;
 
 }
-void justSaveElsAndTex(string xmlName, string rgbFile, string depthFile)
+void saveElsAndTexFromDepthAndRGB(string xmlName, string rgbFile, string depthFile)
 {
 	cv::Mat_<cv::Vec3b> rgb;
 	cv::Mat_<int> depth;
@@ -235,9 +235,9 @@ void test(string name, string inputPath, string rgbFileScene,  string depthFileS
 //get depth and rgb image from point cloud
 Mat_<ushort> getDepthMapFromPointCloud(pcl::PointCloud<pcl::PointXYZRGBA> cloud){
 	Mat_<ushort> depthm(cloud.height, cloud.width);
-	for(size_t r = 0; r < depthm.rows; ++r)
+	for(int r = 0; r < depthm.rows; ++r)
 	{
-		for(size_t c = 0; c < depthm.cols; ++c)
+		for(int c = 0; c < depthm.cols; ++c)
 		{
 			depthm[r][c] = (ushort)(cloud(c,r).z * (-1000));
 		}
@@ -247,19 +247,17 @@ Mat_<ushort> getDepthMapFromPointCloud(pcl::PointCloud<pcl::PointXYZRGBA> cloud)
 }
 
 
-cv::Mat getRgbImageFromPointCloud(pcl::PointCloud<pcl::PointXYZRGBA> cloud){
-	cv::Mat result;
+Mat_<Vec3b> getRgbImageFromPointCloud(pcl::PointCloud<pcl::PointXYZRGBA> cloud){
+	Mat_<Vec3b> result;
 	if (cloud.isOrganized()) {
-		result = cv::Mat(cloud.height, cloud.width, CV_8UC3);
+		result = cv::Mat_<Vec3b>(cloud.height, cloud.width);
 
 		if (!cloud.empty()) {
 
 			for (int h=0; h<result.rows; h++) {
 				for (int w=0; w<result.cols; w++) {
 					pcl::PointXYZRGBA point = cloud.at(w, h);
-
 					Eigen::Vector3i rgb = point.getRGBVector3i();
-
 					result.at<cv::Vec3b>(h,w)[0] = rgb[2];
 					result.at<cv::Vec3b>(h,w)[1] = rgb[1];
 					result.at<cv::Vec3b>(h,w)[2] = rgb[0];
@@ -272,86 +270,209 @@ cv::Mat getRgbImageFromPointCloud(pcl::PointCloud<pcl::PointXYZRGBA> cloud){
 
 //*************************************************************************************************************
 
-std::pair<DescSeg::Vec, DescTex::Vec> getSegAndTex(string xmlName, cv::Mat_<cv::Vec3b> rgb,
-		cv::Mat_<int> depth, string pointCloudFile, bool usePCD){
-	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
+void saveSegAndTexFromPointCloud(string xmlName, string pointcl, CameraCalibrationCV cc){
+	//point cloud needs to be xyzrgba
+	pcl::PointCloud<pcl::PointXYZRGBA> cloud;
 
-	DescECV::Vec surf;
-
+	if (pcl::io::loadPCDFile<pcl::PointXYZRGBA> (pointcl, cloud) == -1)
+	{
+		cout << "couldnt open pcd file" << endl;
+	}
+	Mat_<Vec3b> rgb = getRgbImageFromPointCloud(cloud);
+	Mat depth = getDepthMapFromPointCloud(cloud);
 	const int w = rgb.cols;
 	const int h = rgb.rows;
 
-	pcl::PointCloud<pcl::PointXYZ> cloud;
-
-	if (pcl::io::loadPCDFile<pcl::PointXYZ> (pointCloudFile, cloud) == -1)
-	{
-		std::cout << "Couldn't read file pcd" << endl;
-	}
-	else std::cout << "Loaded " << endl;
-
-	cout << "is cloud organised? " << cloud.isOrganized() << endl;
-	cout << "cloud height: " << cloud.height << " , width: " << cloud.width << endl;
 	const int hc = cloud.height;
 	const int wc = cloud.width;
-
-
-	//check if it is artificial data or real
-	int artificial = 1;
-	for (int r = 0; r < hc; ++r) {
-		for (int c = 0; c < wc; ++c) {
-			const pcl::PointXYZ& p = cloud(c,r);
-			if(pcl::isFinite(p)) {
-				if (p.z < 0)
-				{
-					artificial = -1;
-					break;
-				}
-			}
-		}
-	}
 
 
 	//converts from pcd to Mat
 	cv::Mat_<cv::Vec3f> data3D(hc, wc, cv::Vec3f::all(0.0f));
 	for (int r = 0; r < hc; ++r) {
 		for (int c = 0; c < wc; ++c) {
-			const pcl::PointXYZ& p = cloud(c,r);
+			pcl::PointXYZRGBA p = cloud.at(c,r);
 			if(pcl::isFinite(p)) {
 				data3D(r, c)[0] = p.x * 1000;
 				data3D(r, c)[1] = p.y * 1000;
-				data3D(r, c)[2] = p.z * 1000 * artificial;
+				data3D(r, c)[2] = p.z * 1000;
+			}
+		}
+	}
+	std::tr1::shared_ptr<std::vector<extendedLineSegment3D> > _els(new std::vector<extendedLineSegment3D>);
+	std::tr1::shared_ptr<std::vector<lineSegment2D> > _ls(new std::vector<lineSegment2D>);
+
+	// Kinect feature module
+	Modules::KinectFeatureModule kfm;
+
+	// Module parameters
+	XMLWrapper::XMLNode rootnode;
+	if (XMLWrapper::getXMLRootNode("module.xml", rootnode)) {
+		kfm.setParametersFromXML(rootnode, "kinectFeatures");
+	} else {
+		std::cerr << "Failed to load module configuration file \"module.xml\"!" << std::endl;
+		std::cerr << "\tSetting default extraction parameters..." << std::endl;
+		// Set some default parameters
+		kfm.useRansac(50, 1.8f);
+	}
+
+	// Calibration
+	kfm.setCalibration(cc, w, h); // TODO
+
+	// Initialize
+	COVIS_ASSERT(kfm.Init());
+
+	kfm.setKinectData(depth, rgb);
+
+	kfm.computeExtendedLineSegments(_els, _ls, data3D);
+
+	string outXML;
+	outXML.append("./xml/");
+	outXML.append(xmlName);
+	outXML.append("_ELS.xml");
+
+	write3DExtendedLineSegmentsToXMLFile(*_els, outXML.c_str());
+
+	//save temp images
+	const_cast<SingleView<double>&>(kfm.getSingleView()).saveImages();
+
+	COVIS_ASSERT_MSG(!_ls->empty(), "No 2D line segments found!");
+	COVIS_ASSERT_MSG(!_els->empty(), "No extended 3D line segments found!");
+
+	//texlets
+	std::tr1::shared_ptr<std::vector<texlet2D> > texlet2Ds(new std::vector<texlet2D>);
+	std::tr1::shared_ptr<std::vector<texlet3D> > texlet3Ds(new std::vector<texlet3D>);
+
+	kfm.computeTexlets(texlet3Ds, texlet2Ds, data3D, false);
+
+	COVIS_ASSERT_MSG(!texlet2Ds->empty(), "No 2D texlets found!");
+	COVIS_ASSERT_MSG(!texlet3Ds->empty(), "No 3D texlets found!");
+	string outXMLtex;
+	outXMLtex.append("./xml/");
+	outXMLtex.append(xmlName);
+	outXMLtex.append("_TEX.xml");
+	write3DTexletsToXMLFile(*texlet3Ds, outXMLtex.c_str());
+}
+void saveSegAndTexFromRgbAndPointCloud(string xmlName, string pointcl,string rgbPath, string depthPath,  CameraCalibrationCV cc){
+
+	cv::Mat_<cv::Vec3b> rgb;
+	cv::Mat_<int> depth;
+	DescECV::Vec surf;
+	DescriptorUtil().loadRGBD(rgbPath, depthPath, rgb,  depth, cc);
+
+	pcl::PointCloud<pcl::PointXYZRGBA> cloud;
+
+	if (pcl::io::loadPCDFile<pcl::PointXYZRGBA> (pointcl, cloud) == -1)
+	{
+
+	}
+
+	const int w = rgb.cols;
+	const int h = rgb.rows;
+
+	const int hc = cloud.height;
+	const int wc = cloud.width;
+
+
+	//converts from pcd to Mat
+	cv::Mat_<cv::Vec3f> data3D(hc, wc, cv::Vec3f::all(0.0f));
+	for (int r = 0; r < hc; ++r) {
+		for (int c = 0; c < wc; ++c) {
+			pcl::PointXYZRGBA p = cloud.at(c,r);
+			if(pcl::isFinite(p)) {
+				data3D(r, c)[0] = p.x * 1000;
+				data3D(r, c)[1] = p.y * 1000;
+				data3D(r, c)[2] = p.z * 1000;
+			}
+		}
+	}
+	std::tr1::shared_ptr<std::vector<extendedLineSegment3D> > _els(new std::vector<extendedLineSegment3D>);
+	std::tr1::shared_ptr<std::vector<lineSegment2D> > _ls(new std::vector<lineSegment2D>);
+
+	// Kinect feature module
+	Modules::KinectFeatureModule kfm;
+
+	// Module parameters
+	XMLWrapper::XMLNode rootnode;
+	if (XMLWrapper::getXMLRootNode("module.xml", rootnode)) {
+		kfm.setParametersFromXML(rootnode, "kinectFeatures");
+	} else {
+		std::cerr << "Failed to load module configuration file \"module.xml\"!" << std::endl;
+		std::cerr << "\tSetting default extraction parameters..." << std::endl;
+		// Set some default parameters
+		kfm.useRansac(50, 1.8f);
+	}
+
+
+
+	// Calibration
+	kfm.setCalibration(cc, w, h); // TODO
+
+	// Initialize
+	COVIS_ASSERT(kfm.Init());
+
+	kfm.setKinectData(depth, rgb);
+
+	kfm.computeExtendedLineSegments(_els, _ls, data3D);
+
+	string outXML;
+	outXML.append("./xml/");
+	outXML.append(xmlName);
+	outXML.append("_ELS.xml");
+
+	write3DExtendedLineSegmentsToXMLFile(*_els, outXML.c_str());
+
+	//save temp images
+	const_cast<SingleView<double>&>(kfm.getSingleView()).saveImages();
+
+	COVIS_ASSERT_MSG(!_ls->empty(), "No 2D line segments found!");
+	COVIS_ASSERT_MSG(!_els->empty(), "No extended 3D line segments found!");
+
+	//texlets
+	std::tr1::shared_ptr<std::vector<texlet2D> > texlet2Ds(new std::vector<texlet2D>);
+	std::tr1::shared_ptr<std::vector<texlet3D> > texlet3Ds(new std::vector<texlet3D>);
+
+	kfm.computeTexlets(texlet3Ds, texlet2Ds, data3D, false);
+
+	COVIS_ASSERT_MSG(!texlet2Ds->empty(), "No 2D texlets found!");
+	COVIS_ASSERT_MSG(!texlet3Ds->empty(), "No 3D texlets found!");
+	string outXMLtex;
+	outXMLtex.append("./xml/");
+	outXMLtex.append(xmlName);
+	outXMLtex.append("_TEX.xml");
+	write3DTexletsToXMLFile(*texlet3Ds, outXMLtex.c_str());
+}
+
+std::pair<DescSeg::Vec, DescTex::Vec>  getElsAndTexForScene(string xmlName, string pointCloudFile, CameraCalibrationCV cc){
+
+	pcl::PointCloud<pcl::PointXYZRGBA> cloud;
+
+	if (pcl::io::loadPCDFile<pcl::PointXYZRGBA> (pointCloudFile, cloud) == -1)
+	{
+		cout << "couldnt load point cloud!" << endl;
+	}
+	Mat_<Vec3b> rgb = getRgbImageFromPointCloud(cloud);
+	Mat depth = getDepthMapFromPointCloud(cloud);
+	const int w = rgb.cols;
+	const int h = rgb.rows;
+
+	const int hc = cloud.height;
+	const int wc = cloud.width;
+
+	//converts from pcd to Mat
+	cv::Mat_<cv::Vec3f> data3D(hc, wc, cv::Vec3f::all(0.0f));
+	for (int r = 0; r < hc; ++r) {
+		for (int c = 0; c < wc; ++c) {
+			const pcl::PointXYZRGBA& p = cloud(c,r);
+			if(pcl::isFinite(p)) {
+				data3D(r, c)[0] = p.x * 1000;
+				data3D(r, c)[1] = p.y * 1000;
+				data3D(r, c)[2] = p.z * 1000;
 			}
 		}
 	}
 
-
-	DescXYZ::Vec points;
-	cv::Mat_<int> map;
-	DescriptorUtil().reproject(depth, points, map, cc);
-
-	const int size = points.size();
-
-	// Check the mapping
-	cv::Mat_<int> mapp;
-	if (map.empty()) { // If empty, default to dense map, row-major
-		COVIS_ASSERT_MSG(size == w*h, "Too few 3D points!");;
-
-		mapp = cv::Mat_<int>(h, w);
-		int index = 0;
-		for (int r = 0; r < h; ++r)
-			for (int c = 0;  c < w; ++c)
-				mapp(r, c) = index++;
-	} else {
-		mapp = map;
-	}
-
-
-
 	DescriptorEstimation de;
-
-	//pair<DescSeg::Vec, DescTex::Vec> temp =de.ecv(rgb, depth, surf, true, true, els, tex);
-	//de.getElsAndTex(rgb, depth, data3D, surf, els, tex);
-
 
 	std::tr1::shared_ptr<std::vector<extendedLineSegment3D> > _els(new std::vector<extendedLineSegment3D>);
 	std::tr1::shared_ptr<std::vector<lineSegment2D> > _ls(new std::vector<lineSegment2D>);
@@ -373,27 +494,11 @@ std::pair<DescSeg::Vec, DescTex::Vec> getSegAndTex(string xmlName, cv::Mat_<cv::
 	// Calibration
 	kfm.setCalibration(cc, w, h); // TODO
 
-	// Compute image of XYZ values
-	cv::Mat_<cv::Vec3f> data3D2(h, w, cv::Vec3f::all(0.0f));
-	for (int r = 0; r < h; ++r) {
-		for (int c = 0; c < w; ++c) {
-			const int idx = map(r, c);
-			if (idx != -1) {
-				const DescXYZ& d = points[idx];
-				data3D2(r, c)[0] = d.x;
-				data3D2(r, c)[1] = d.y;
-				data3D2(r, c)[2] = d.z;
-			}
-		}
-	}
-
 	// Initialize
 	COVIS_ASSERT(kfm.Init());
 
 	// Set input data
-	cv::Mat imgBGR; // NOTE: This assumes BGR alignment!
-	cv::cvtColor(rgb, imgBGR, CV_RGB2BGR);
-	kfm.setKinectData(depth, imgBGR);
+	kfm.setKinectData(depth, rgb);
 
 	// Results
 	std::pair<DescSeg::Vec, DescTex::Vec> result;
@@ -402,13 +507,11 @@ std::pair<DescSeg::Vec, DescTex::Vec> getSegAndTex(string xmlName, cv::Mat_<cv::
 	keypointsSeg.clear();
 	keypointsTex.clear();
 
-	DescXYZ::Vec _temp = DescriptorUtil().fromPCL<pcl::PointXYZ, DescXYZ>(cloud, false);
+	DescXYZ::Vec _temp = DescriptorUtil().fromPCL<pcl::PointXYZRGBA, DescXYZ>(cloud, false);
 	// Search structure in input
 	typename CorrespondenceSearch<DescXYZ>::Ptr searchInput = CorrespondenceSearch<DescXYZ>::MakeXYZNNSearch(_temp, 1);
 
-
-	if (!usePCD) kfm.computeExtendedLineSegments(_els, _ls, data3D2);
-	else kfm.computeExtendedLineSegments(_els, _ls, data3D);
+	kfm.computeExtendedLineSegments(_els, _ls, data3D);
 
 
 	string outXML;
@@ -417,7 +520,6 @@ std::pair<DescSeg::Vec, DescTex::Vec> getSegAndTex(string xmlName, cv::Mat_<cv::
 	outXML.append("_ELS.xml");
 
 	write3DExtendedLineSegmentsToXMLFile(*_els, outXML.c_str());
-
 
 	//save temp images
 	const_cast<SingleView<double>&>(kfm.getSingleView()).saveImages();
@@ -439,8 +541,7 @@ std::pair<DescSeg::Vec, DescTex::Vec> getSegAndTex(string xmlName, cv::Mat_<cv::
 	//texlets
 	std::tr1::shared_ptr<std::vector<texlet2D> > texlet2Ds(new std::vector<texlet2D>);
 	std::tr1::shared_ptr<std::vector<texlet3D> > texlet3Ds(new std::vector<texlet3D>);
-	if (!usePCD) kfm.computeTexlets(texlet3Ds, texlet2Ds, data3D2, false);
-	else kfm.computeTexlets(texlet3Ds, texlet2Ds, data3D, false);
+	kfm.computeTexlets(texlet3Ds, texlet2Ds, data3D, false);
 
 	// Store texlets
 	result.second = DescriptorEstimation().tex<DescTex>(*texlet3Ds);
@@ -468,7 +569,7 @@ std::pair<DescSeg::Vec, DescTex::Vec> getSegAndTex(string xmlName, cv::Mat_<cv::
 	kfmSurf.setCalibration(cc, w, h); // TODO
 	kfmSurf.setFilterType(MONOGENIC_FREQ0110);
 	kfmSurf.setTexletiDThresholds(0.01, 0.01);
-	kfmSurf.setKinectData(depth, imgBGR);
+	kfmSurf.setKinectData(depth, rgb);
 
 	// Initialize
 	COVIS_ASSERT(kfmSurf.Init());
@@ -477,8 +578,7 @@ std::pair<DescSeg::Vec, DescTex::Vec> getSegAndTex(string xmlName, cv::Mat_<cv::
 	std::tr1::shared_ptr<std::vector<texlet2D> > texlet2DSurf(new std::vector<texlet2D>);
 	std::tr1::shared_ptr<std::vector<texlet3D> > texlet3DSurf(new std::vector<texlet3D>);
 
-	if (!usePCD) kfmSurf.computeTexlets(texlet3DSurf, texlet2DSurf, data3D2, true);
-	else kfmSurf.computeTexlets(texlet3DSurf, texlet2DSurf, data3D, true);
+	kfmSurf.computeTexlets(texlet3DSurf, texlet2DSurf, data3D, true);
 
 	DescECV::Vec surface = DescriptorEstimation().tex<DescECV>(*texlet3DSurf);
 
@@ -494,9 +594,8 @@ std::pair<DescSeg::Vec, DescTex::Vec> getSegAndTex(string xmlName, cv::Mat_<cv::
 	}
 
 	return result;
+
 }
-
-
 
 
 int main(int argc, char* argv[])
@@ -504,57 +603,28 @@ int main(int argc, char* argv[])
 	string inputPath = string("./in/");
 	string outputPath = string("./out/");
 
+	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
+	string pointcl = "./in/scene2.pcd";
+	bool flag  = true;
+
+	std::pair<DescSeg::Vec, DescTex::Vec> obj = computeELSfromPointCLoud2("object", "./in/top.ppm", "./in/top.png", "./in/top.pcd", flag);
+
+	std::pair<DescSeg::Vec, DescTex::Vec> scene  = getElsAndTexForScene("scene", pointcl, cc);
 	DescTex::Vec texobj, texscn;
+	texobj = obj.first;
+	texscn = scene.first;
 
-	bool flag = true;
+//	DescriptorUtil().show<DescTex>(texobj, texscn, "crap");
 
-			std::pair<DescSeg::Vec, DescTex::Vec> obj = computeELSfromPointCLoud2("object", "./in/top.ppm", "./in/top.png", "./in/top.pcd", flag);
-	//		std::pair<DescSeg::Vec, DescTex::Vec> scene = computeELSfromPointCLoud2("s2", "./in/s2.tiff", "./in/s2_depth.tiff", "./in/scene2.pcd", flag);
+	const float fradius = 25;
 
-	string pointcl = "./in/top.pcd";
-	pcl::PointCloud<pcl::PointXYZRGBA> cloud;
-
-	if (pcl::io::loadPCDFile<pcl::PointXYZRGBA> ("./in/scene2.pcd", cloud) == -1)
-	{
-		std::cout << "Couldn't read file pcd" << endl;
-	}
-	else std::cout << "Loaded " << endl;
-
-	//	cv::Mat_<cv::Vec3b> rgb;
-	//	cv::Mat_<int> depth;
-	//	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
-	//	DescriptorUtil().loadRGBD("./in/top.ppm", "./in/s2_depth.tiff", rgb,  depth, cc);
-
-	Mat_<ushort> depthImg = getDepthMapFromPointCloud(cloud);
-	//	cv::Mat_<float> df = depthImg;
-	//	normalize(df, df, 1, 0, CV_MINMAX);
-	//	imshow("", df);
-	//
-	//	cv::Mat_<float> df2 = depth;
-	//	normalize(df2, df2, 1, 0, CV_MINMAX);
-	//	imshow("d2", df2);
-
-	Mat_<Vec3b> rgb2 = getRgbImageFromPointCloud(cloud);
+	Recognition<DescTex,DescHist>::Ptr rec(new RecognitionVoting<DescTex,DescHist>(1, fradius, 5, 0.05, false, false, false, INF_FLOAT));;
+//	rec->setVerbose(true);
+	rec->setCoplanarityFraction(1);
+	rec->loadObjectsL(std::vector<DescTex::Vec>(1,texobj));
+	DescriptorUtil().showDetections<DescTex>(std::vector<DescTex::Vec>(1,texobj), texscn, rec->recognizeL(texscn));
 
 
-	std::pair<DescSeg::Vec, DescTex::Vec> scene = getSegAndTex("scene2Res", rgb2, depthImg, pointcl, flag);
-
-
-//
-//		texobj = obj.second;
-//		texscn = scene.second;
-//
-//		//	DescriptorUtil().show<DescTex>(texobj, texscn, "crap");
-//
-//		Recognition<DescTex,DescHist>::Ptr rec(new RecognitionVoting<DescTex,DescHist>(1, 25, 5, 0.05, false, false, false, INF_FLOAT));
-//		//	rec->setVerbose(true);
-//		rec->setCoplanarityFraction(1);
-//
-//		rec->loadObjectsL(std::vector<DescTex::Vec>(1,texobj));
-//
-//
-//		DescriptorUtil().showDetections<DescTex>(std::vector<DescTex::Vec>(1,texobj), texscn, rec->recognizeL(texscn));
-//
 
 	waitKey(0);
 	return 0;
@@ -804,7 +874,7 @@ std::pair<DescHist::Vec, DescHist::Vec> computeELSfromPointCLoud(string xmlName,
 }
 
 std::pair<DescSeg::Vec, DescTex::Vec>  computeELSfromPointCLoud2(string xmlName, string rgbFile, string depthFile, string pointCloudFile, bool usePCD)
-																								{
+																																												{
 	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
 
 	cv::Mat_<cv::Vec3b> rgb;
@@ -1032,5 +1102,5 @@ std::pair<DescSeg::Vec, DescTex::Vec>  computeELSfromPointCLoud2(string xmlName,
 
 
 	return result;
-																								}
+																																												}
 
