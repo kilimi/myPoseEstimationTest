@@ -9,13 +9,16 @@
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
 
+#include <stdlib.h>     /* srand, rand */
+#include <time.h>
+
 using namespace std;
 using namespace PoseEstimation;
 using namespace cv;
 
 typedef DescRGBN DescT;
 std::pair<DescHist::Vec, DescHist::Vec> computeELSfromPointCLoud(string xmlName, string rgbFile, string depthFile, string pointCloudFile, bool usePCD);
-std::pair<DescSeg::Vec, DescTex::Vec>  computeELSfromPointCLoud2(string xmlName, string rgbFile, string depthFile, string pointCloudFile, bool usePCD);
+std::pair<DescSeg::Vec, DescTex::Vec>  computeELSfromPointCLoud2(string xmlName, string rgbFile, string depthFile, string pointCloudFile, bool usePCD, DescECV::Vec &surface);
 void setTransformation( KVector<> &_t, KMatrix<> &_R, int camera)
 {
 	KMatrix<> yaw;
@@ -443,7 +446,7 @@ void saveSegAndTexFromRgbAndPointCloud(string xmlName, string pointcl,string rgb
 	write3DTexletsToXMLFile(*texlet3Ds, outXMLtex.c_str());
 }
 
-std::pair<DescSeg::Vec, DescTex::Vec>  getElsAndTexForScene(string xmlName, string pointCloudFile, CameraCalibrationCV cc){
+std::pair<DescSeg::Vec, DescTex::Vec>  getElsAndTexForScene(string xmlName, string pointCloudFile, CameraCalibrationCV cc, DescECV::Vec &surface){
 
 	pcl::PointCloud<pcl::PointXYZRGBA> cloud;
 
@@ -580,7 +583,7 @@ std::pair<DescSeg::Vec, DescTex::Vec>  getElsAndTexForScene(string xmlName, stri
 
 	kfmSurf.computeTexlets(texlet3DSurf, texlet2DSurf, data3D, true);
 
-	DescECV::Vec surface = DescriptorEstimation().tex<DescECV>(*texlet3DSurf);
+	surface = DescriptorEstimation().tex<DescECV>(*texlet3DSurf);
 
 	bool _normalize = true;
 	// Normalization
@@ -597,6 +600,42 @@ std::pair<DescSeg::Vec, DescTex::Vec>  getElsAndTexForScene(string xmlName, stri
 
 }
 
+void runRansac(Correspondence::Vec corrs, DescECV::Vec source, DescECV::Vec target)
+{
+	cout << "Correspondance size: " << corrs.size() << endl;
+//	typename FitEvaluation<DescECV>::Ptr fe(new FitEvaluation<DescT>(source, target));
+	int amountOfIterations = 30;
+	for (int i = 0; i < amountOfIterations; i++)
+	{
+		const vector<int> index = randidx(corrs.size(), 3);
+		if (index[0] == index[1] || index[0] == index[2] || index[1] == index[2])
+			break;
+		Correspondence::Vec inliers(3);
+		for (int i = 0; i < 3; i++) inliers[i] = corrs[index[i]];
+		//cout << inliers[0].source << " --- " << inliers[0][0] << endl;
+		PoseSampler<DescECV> ps(source, target);
+		const KMatrix<> transformationMatrix = ps.transformation(inliers);
+		cout << transformationMatrix << endl;
+		//TRANSFORM
+		for (unsigned int i = 0; i < source.size(); ++i) {
+			AlignmentUtil().transform<DescECV>(source[i], transformationMatrix);
+		}
+
+		//transform correspondance and see if the are where they should be?
+
+		//calculate amount of inliers
+
+		for (unsigned int i = 0; i < source.size(); i++)
+		{
+
+		}
+
+
+//		DescriptorUtil().showAlignment<DescSeg>(source, target, transformationMatrix);
+
+	}
+
+}
 
 int main(int argc, char* argv[])
 {
@@ -604,25 +643,51 @@ int main(int argc, char* argv[])
 	string outputPath = string("./out/");
 
 	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
-	string pointcl = "./in/scene2.pcd";
+	string pointcl = "./in/st2.pcd";
 	bool flag  = true;
+	DescECV::Vec surfaceObj, surfaceScene;
+	std::pair<DescSeg::Vec, DescTex::Vec> obj = computeELSfromPointCLoud2("object", "./in/top.ppm", "./in/top.png", "./in/top.pcd", flag, surfaceObj);
+	std::pair<DescSeg::Vec, DescTex::Vec> scene  = getElsAndTexForScene("scene", pointcl, cc, surfaceScene);
 
-	std::pair<DescSeg::Vec, DescTex::Vec> obj = computeELSfromPointCLoud2("object", "./in/top.ppm", "./in/top.png", "./in/top.pcd", flag);
+	std::pair<DescHist::Vec, DescHist::Vec> histObj = DescriptorEstimation().histogramECV(obj, surfaceObj, 10, 10, false, true);
+	std::pair<DescHist::Vec, DescHist::Vec> histScn = DescriptorEstimation().histogramECV(scene, surfaceScene, 10, 10, false, true);
 
-	std::pair<DescSeg::Vec, DescTex::Vec> scene  = getElsAndTexForScene("scene", pointcl, cc);
-	DescTex::Vec texobj, texscn;
-	texobj = obj.first;
-	texscn = scene.first;
 
-//	DescriptorUtil().show<DescTex>(texobj, texscn, "crap");
+	DescECV::Vec texobj = obj.second;
+	DescECV::Vec texscn = scene.second;
 
-	const float fradius = 25;
 
-	Recognition<DescTex,DescHist>::Ptr rec(new RecognitionVoting<DescTex,DescHist>(1, fradius, 5, 0.05, false, false, false, INF_FLOAT));;
-//	rec->setVerbose(true);
-	rec->setCoplanarityFraction(1);
-	rec->loadObjectsL(std::vector<DescTex::Vec>(1,texobj));
-	DescriptorUtil().showDetections<DescTex>(std::vector<DescTex::Vec>(1,texobj), texscn, rec->recognizeL(texscn));
+	DescHist::Vec source, target;
+	source = histObj.first;
+	target = histScn.first;
+	CorrespondenceSearch<DescHist>::Ptr search = CorrespondenceSearch<DescHist>::MakeFeatureNNSearch(target, 10); //MakeXYZRadiusSearch(target, 25.0f);
+	search->query(source);
+	const Correspondence::Vec& corrs = search->getCorr();
+	runRansac(corrs, obj.first, scene.first);
+
+
+
+	//show texlets
+	//	DescriptorUtil du;
+	//	DescriptorUtil::ViewT view;
+	//	du.addPoints<DescHist>(view, hist.second, "tex_obj");
+	//	du.addPoints<DescHist>(view, histScene.second, "tex_scn");
+	//	du.show(view);
+
+	//	AlignmentUtil().translate<DescHist>(source, 0, 0, -100);
+	//	DescriptorUtil().showCorr<DescHist>(source, target, nearestFeatures<DescHist>(source, target), 50);
+
+
+	//calculate histogramms
+	//	//	DescriptorUtil().show<DescTex>(texobj, texscn, "crap");
+	//
+//			const float fradius = 25;
+//
+//			Recognition<DescTex,DescHist>::Ptr rec(new RecognitionVoting<DescTex,DescHist>(1, fradius, 5, 0.05, false, false, false, INF_FLOAT));;
+//			rec->setVerbose(true);
+//			rec->setCoplanarityFraction(1);
+//			rec->loadObjectsL(std::vector<DescTex::Vec>(1,texobj));
+//			DescriptorUtil().showDetections<DescTex>(std::vector<DescTex::Vec>(1,texobj), texscn, rec->recognizeL(texscn));
 
 
 
@@ -873,8 +938,8 @@ std::pair<DescHist::Vec, DescHist::Vec> computeELSfromPointCLoud(string xmlName,
 	return hist;
 }
 
-std::pair<DescSeg::Vec, DescTex::Vec>  computeELSfromPointCLoud2(string xmlName, string rgbFile, string depthFile, string pointCloudFile, bool usePCD)
-																																												{
+std::pair<DescSeg::Vec, DescTex::Vec>  computeELSfromPointCLoud2(string xmlName, string rgbFile, string depthFile, string pointCloudFile, bool usePCD, DescECV::Vec &surface)
+								{
 	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
 
 	cv::Mat_<cv::Vec3b> rgb;
@@ -1022,7 +1087,6 @@ std::pair<DescSeg::Vec, DescTex::Vec>  computeELSfromPointCLoud2(string xmlName,
 
 	write3DExtendedLineSegmentsToXMLFile(*_els, outXML.c_str());
 
-
 	//save temp images
 	const_cast<SingleView<double>&>(kfm.getSingleView()).saveImages();
 	// Store segments
@@ -1084,7 +1148,7 @@ std::pair<DescSeg::Vec, DescTex::Vec>  computeELSfromPointCLoud2(string xmlName,
 	if (!usePCD) kfmSurf.computeTexlets(texlet3DSurf, texlet2DSurf, data3D2, true);
 	else kfmSurf.computeTexlets(texlet3DSurf, texlet2DSurf, data3D, true);
 
-	DescECV::Vec surface = DescriptorEstimation().tex<DescECV>(*texlet3DSurf);
+	surface = DescriptorEstimation().tex<DescECV>(*texlet3DSurf);
 
 	bool _normalize = true;
 	// Normalization
@@ -1102,5 +1166,5 @@ std::pair<DescSeg::Vec, DescTex::Vec>  computeELSfromPointCLoud2(string xmlName,
 
 
 	return result;
-																																												}
+								}
 
