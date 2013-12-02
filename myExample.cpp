@@ -625,7 +625,7 @@ void runRansac(Correspondence::Vec corrs, DescECV::Vec source, DescECV::Vec targ
 		}
 		//calculate amount of inliers
 		unsigned int inliersTarget = 0;
-		float error = 5;
+		float error = 3;
 		for (unsigned int ii = 0; ii < source.size(); ii++)
 		{
 			for (unsigned int j = 0; j < target.size(); j++)
@@ -648,7 +648,7 @@ void runRansac(Correspondence::Vec corrs, DescECV::Vec source, DescECV::Vec targ
 			if (maxInliers > source.size()) break;
 		}
 
-//		cout << "iteration: "<< iter << ":::::::Inliers cout: " << inliersTarget << endl;
+		//		cout << "iteration: "<< iter << ":::::::Inliers cout: " << inliersTarget << endl;
 	}
 	cout << "max inliers: "<< maxInliers << endl;
 	DescriptorUtil().showAlignment<DescSeg>(source, target, maxTransformationMatrix);
@@ -660,10 +660,13 @@ int main(int argc, char* argv[])
 	string outputPath = string("./out/");
 
 	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
-	string pointcl = "./in/temp1.pcd";
+
+	string pointcl = "./in/scener4.pcd";
 	bool flag  = true;
 	DescECV::Vec surfaceObj, surfaceScene;
-	std::pair<DescSeg::Vec, DescTex::Vec> obj = computeELSfromPointCLoud2("RingObject", "./in/circle_far.ppm", "./in/circle_far.png", "./in/circle_far.pcd", flag, surfaceObj);
+
+	string object = "./in/circle_close_top.";
+	std::pair<DescSeg::Vec, DescTex::Vec> obj = computeELSfromPointCLoud2("RingObject", object + "ppm", object + "png", object + "pcd", flag, surfaceObj);
 	std::pair<DescSeg::Vec, DescTex::Vec> scene  = getElsAndTexForScene("RingScene", pointcl, cc, surfaceScene);
 
 	std::pair<DescHist::Vec, DescHist::Vec> histObj = DescriptorEstimation().histogramECV(obj, surfaceObj, 10, 10, false, true);
@@ -677,9 +680,13 @@ int main(int argc, char* argv[])
 	DescHist::Vec source, target;
 	source = histObj.first;
 	target = histScn.first;
-	CorrespondenceSearch<DescHist>::Ptr search = CorrespondenceSearch<DescHist>::MakeFeatureNNSearch(target, 10); //MakeXYZRadiusSearch(target, 25.0f);
+	CorrespondenceSearch<DescHist>::Ptr search = CorrespondenceSearch<DescHist>::MakeFeatureNNSearch(target, 25); //MakeXYZRadiusSearch(target, 25.0f);
 	search->query(source);
 	const Correspondence::Vec& corrs = search->getCorr();
+
+	AlignmentUtil().translate<DescHist>(source, 0, 0, -100);
+	DescriptorUtil().showCorr<DescHist>(source, target, nearestFeatures<DescHist>(source, target), 50);
+
 	runRansac(corrs, obj.first, scene.first);
 
 
@@ -691,8 +698,7 @@ int main(int argc, char* argv[])
 	//	du.addPoints<DescHist>(view, histScene.second, "tex_scn");
 	//	du.show(view);
 
-//		AlignmentUtil().translate<DescHist>(source, 0, 0, -100);
-//		DescriptorUtil().showCorr<DescHist>(source, target, nearestFeatures<DescHist>(source, target), 50);
+
 
 
 	//calculate histogramms
@@ -956,7 +962,7 @@ std::pair<DescHist::Vec, DescHist::Vec> computeELSfromPointCLoud(string xmlName,
 }
 
 std::pair<DescSeg::Vec, DescTex::Vec>  computeELSfromPointCLoud2(string xmlName, string rgbFile, string depthFile, string pointCloudFile, bool usePCD, DescECV::Vec &surface)
-												{
+																{
 	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
 
 	cv::Mat_<cv::Vec3b> rgb;
@@ -1183,5 +1189,4 @@ std::pair<DescSeg::Vec, DescTex::Vec>  computeELSfromPointCLoud2(string xmlName,
 
 
 	return result;
-												}
-
+																}
