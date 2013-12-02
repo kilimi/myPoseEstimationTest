@@ -602,36 +602,53 @@ std::pair<DescSeg::Vec, DescTex::Vec>  getElsAndTexForScene(string xmlName, stri
 
 void runRansac(Correspondence::Vec corrs, DescECV::Vec source, DescECV::Vec target)
 {
+
 	cout << "Correspondance size: " << corrs.size() << endl;
-//	typename FitEvaluation<DescECV>::Ptr fe(new FitEvaluation<DescT>(source, target));
-	int amountOfIterations = 30;
-	for (int i = 0; i < amountOfIterations; i++)
+	cout << "Target size: " << target.size() << endl;
+	cout << "Source size: " << source.size() << endl;
+	int amountOfIterations = 3000;
+	for (int iter = 0; iter < amountOfIterations; iter++)
 	{
+		DescECV::Vec sourceCopy = source;
 		const vector<int> index = randidx(corrs.size(), 3);
 		if (index[0] == index[1] || index[0] == index[2] || index[1] == index[2])
 			break;
 		Correspondence::Vec inliers(3);
 		for (int i = 0; i < 3; i++) inliers[i] = corrs[index[i]];
-		//cout << inliers[0].source << " --- " << inliers[0][0] << endl;
 		PoseSampler<DescECV> ps(source, target);
 		const KMatrix<> transformationMatrix = ps.transformation(inliers);
-		cout << transformationMatrix << endl;
+
 		//TRANSFORM
 		for (unsigned int i = 0; i < source.size(); ++i) {
-			AlignmentUtil().transform<DescECV>(source[i], transformationMatrix);
+			AlignmentUtil().transform<DescECV>(sourceCopy[i], transformationMatrix);
 		}
 
 		//transform correspondance and see if the are where they should be?
 
 		//calculate amount of inliers
-
-		for (unsigned int i = 0; i < source.size(); i++)
+		int inliersTarget = 0;
+		float error = 5;
+		for (unsigned int ii = 0; ii < source.size(); ii++)
 		{
-
+			for (unsigned int j = 0; j < target.size(); j++)
+			{
+				float res = sqrt((target[j].x - sourceCopy[ii].x) * (target[j].x - sourceCopy[ii].x) +
+						(target[j].y - sourceCopy[ii].y) * (target[j].y - sourceCopy[ii].y) +
+						(target[j].z - sourceCopy[ii].z) * (target[j].z - sourceCopy[ii].z));
+				if (res <= error)
+				{
+					inliersTarget++;
+					break;
+				}
+			}
 		}
 
-
-//		DescriptorUtil().showAlignment<DescSeg>(source, target, transformationMatrix);
+		cout << "iteration: "<< iter << ":::::::Inliers cout: " << inliersTarget << endl;
+        if (inliersTarget > 20)
+        {
+        	DescriptorUtil().showAlignment<DescSeg>(source, target, transformationMatrix);
+//        	break;
+        }
 
 	}
 
@@ -681,13 +698,13 @@ int main(int argc, char* argv[])
 	//calculate histogramms
 	//	//	DescriptorUtil().show<DescTex>(texobj, texscn, "crap");
 	//
-//			const float fradius = 25;
-//
-//			Recognition<DescTex,DescHist>::Ptr rec(new RecognitionVoting<DescTex,DescHist>(1, fradius, 5, 0.05, false, false, false, INF_FLOAT));;
-//			rec->setVerbose(true);
-//			rec->setCoplanarityFraction(1);
-//			rec->loadObjectsL(std::vector<DescTex::Vec>(1,texobj));
-//			DescriptorUtil().showDetections<DescTex>(std::vector<DescTex::Vec>(1,texobj), texscn, rec->recognizeL(texscn));
+	//			const float fradius = 25;
+	//
+	//			Recognition<DescTex,DescHist>::Ptr rec(new RecognitionVoting<DescTex,DescHist>(1, fradius, 5, 0.05, false, false, false, INF_FLOAT));;
+	//			rec->setVerbose(true);
+	//			rec->setCoplanarityFraction(1);
+	//			rec->loadObjectsL(std::vector<DescTex::Vec>(1,texobj));
+	//			DescriptorUtil().showDetections<DescTex>(std::vector<DescTex::Vec>(1,texobj), texscn, rec->recognizeL(texscn));
 
 
 
@@ -939,7 +956,7 @@ std::pair<DescHist::Vec, DescHist::Vec> computeELSfromPointCLoud(string xmlName,
 }
 
 std::pair<DescSeg::Vec, DescTex::Vec>  computeELSfromPointCLoud2(string xmlName, string rgbFile, string depthFile, string pointCloudFile, bool usePCD, DescECV::Vec &surface)
-								{
+										{
 	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
 
 	cv::Mat_<cv::Vec3b> rgb;
@@ -1166,5 +1183,5 @@ std::pair<DescSeg::Vec, DescTex::Vec>  computeELSfromPointCLoud2(string xmlName,
 
 
 	return result;
-								}
+										}
 
