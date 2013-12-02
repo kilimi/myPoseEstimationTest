@@ -602,11 +602,12 @@ std::pair<DescSeg::Vec, DescTex::Vec>  getElsAndTexForScene(string xmlName, stri
 
 void runRansac(Correspondence::Vec corrs, DescECV::Vec source, DescECV::Vec target)
 {
-
+	unsigned int maxInliers = 0;
+	KMatrix<> maxTransformationMatrix;
 	cout << "Correspondance size: " << corrs.size() << endl;
 	cout << "Target size: " << target.size() << endl;
 	cout << "Source size: " << source.size() << endl;
-	int amountOfIterations = 3000;
+	int amountOfIterations = 10000;
 	for (int iter = 0; iter < amountOfIterations; iter++)
 	{
 		DescECV::Vec sourceCopy = source;
@@ -622,11 +623,8 @@ void runRansac(Correspondence::Vec corrs, DescECV::Vec source, DescECV::Vec targ
 		for (unsigned int i = 0; i < source.size(); ++i) {
 			AlignmentUtil().transform<DescECV>(sourceCopy[i], transformationMatrix);
 		}
-
-		//transform correspondance and see if the are where they should be?
-
 		//calculate amount of inliers
-		int inliersTarget = 0;
+		unsigned int inliersTarget = 0;
 		float error = 5;
 		for (unsigned int ii = 0; ii < source.size(); ii++)
 		{
@@ -643,15 +641,17 @@ void runRansac(Correspondence::Vec corrs, DescECV::Vec source, DescECV::Vec targ
 			}
 		}
 
-		cout << "iteration: "<< iter << ":::::::Inliers cout: " << inliersTarget << endl;
-        if (inliersTarget > 20)
-        {
-        	DescriptorUtil().showAlignment<DescSeg>(source, target, transformationMatrix);
-//        	break;
-        }
+		if (inliersTarget > maxInliers)
+		{
+			maxInliers = inliersTarget;
+			maxTransformationMatrix = transformationMatrix;
+			if (maxInliers > source.size()) break;
+		}
 
+//		cout << "iteration: "<< iter << ":::::::Inliers cout: " << inliersTarget << endl;
 	}
-
+	cout << "max inliers: "<< maxInliers << endl;
+	DescriptorUtil().showAlignment<DescSeg>(source, target, maxTransformationMatrix);
 }
 
 int main(int argc, char* argv[])
@@ -660,11 +660,11 @@ int main(int argc, char* argv[])
 	string outputPath = string("./out/");
 
 	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
-	string pointcl = "./in/st2.pcd";
+	string pointcl = "./in/temp1.pcd";
 	bool flag  = true;
 	DescECV::Vec surfaceObj, surfaceScene;
-	std::pair<DescSeg::Vec, DescTex::Vec> obj = computeELSfromPointCLoud2("object", "./in/top.ppm", "./in/top.png", "./in/top.pcd", flag, surfaceObj);
-	std::pair<DescSeg::Vec, DescTex::Vec> scene  = getElsAndTexForScene("scene", pointcl, cc, surfaceScene);
+	std::pair<DescSeg::Vec, DescTex::Vec> obj = computeELSfromPointCLoud2("RingObject", "./in/circle_far.ppm", "./in/circle_far.png", "./in/circle_far.pcd", flag, surfaceObj);
+	std::pair<DescSeg::Vec, DescTex::Vec> scene  = getElsAndTexForScene("RingScene", pointcl, cc, surfaceScene);
 
 	std::pair<DescHist::Vec, DescHist::Vec> histObj = DescriptorEstimation().histogramECV(obj, surfaceObj, 10, 10, false, true);
 	std::pair<DescHist::Vec, DescHist::Vec> histScn = DescriptorEstimation().histogramECV(scene, surfaceScene, 10, 10, false, true);
@@ -691,8 +691,8 @@ int main(int argc, char* argv[])
 	//	du.addPoints<DescHist>(view, histScene.second, "tex_scn");
 	//	du.show(view);
 
-	//	AlignmentUtil().translate<DescHist>(source, 0, 0, -100);
-	//	DescriptorUtil().showCorr<DescHist>(source, target, nearestFeatures<DescHist>(source, target), 50);
+//		AlignmentUtil().translate<DescHist>(source, 0, 0, -100);
+//		DescriptorUtil().showCorr<DescHist>(source, target, nearestFeatures<DescHist>(source, target), 50);
 
 
 	//calculate histogramms
@@ -956,7 +956,7 @@ std::pair<DescHist::Vec, DescHist::Vec> computeELSfromPointCLoud(string xmlName,
 }
 
 std::pair<DescSeg::Vec, DescTex::Vec>  computeELSfromPointCLoud2(string xmlName, string rgbFile, string depthFile, string pointCloudFile, bool usePCD, DescECV::Vec &surface)
-										{
+												{
 	CameraCalibrationCV cc = CameraCalibrationCV::KinectIdeal();
 
 	cv::Mat_<cv::Vec3b> rgb;
@@ -1183,5 +1183,5 @@ std::pair<DescSeg::Vec, DescTex::Vec>  computeELSfromPointCLoud2(string xmlName,
 
 
 	return result;
-										}
+												}
 
